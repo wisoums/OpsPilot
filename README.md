@@ -2,7 +2,7 @@
 
 > **Private knowledge when it matters. Web knowledge when it helps. Always cited.**
 
-OpsPilot is an early-stage open-source AI knowledge assistant for teams. It is designed to ingest an organization's own documents, answer questions with source-backed evidence, intelligently route questions between private knowledge and the public web, cache repeated questions, and expose the full retrieval/inference path through observability.
+OpsPilot is an early-stage, publicly developed AI knowledge assistant for teams. It is designed to ingest an organization's own documents, answer questions with source-backed evidence, intelligently route questions between private knowledge and the public web, cache repeated questions, and expose the full retrieval/inference path through observability.
 
 The goal is not to build another chatbot wrapper. OpsPilot is being built as a **trustworthy, deployable AI system** that people can clone, run with their own documents, benchmark, and inspect.
 

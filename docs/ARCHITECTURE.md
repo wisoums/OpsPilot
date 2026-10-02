@@ -1,118 +1,192 @@
 # OpsPilot Architecture
 
-## Design goal
+## Architecture decision
 
-OpsPilot should present one product experience while allowing infrastructure to change underneath it.
+OpsPilot is **AWS-native**.
 
-The core application must depend on provider interfaces rather than AWS-specific or local-specific implementations. This keeps Local Mode useful on its own and prevents AWS Mode from becoming a separate codebase.
+There is no separate local model/vector/cache product stack. Developers may run the web/API code locally during development, but supported data, AI, cache, identity, observability, and deployed runtime paths are AWS-backed.
 
-## Logical layers
+The reason is deliberate: OpsPilot is intended to go deeper on cloud AI engineering rather than maintain duplicate Ollama/local-vector/AWS implementations.
 
-1. **Presentation**
-   - document library
-   - upload/folder ingestion
-   - chat
-   - citation viewer
-   - admin source policy
-   - observability dashboard
+## Primary components
 
-2. **Application/API**
-   - authentication/session
-   - workspace context
-   - request orchestration
-   - ingestion job orchestration
-   - policy enforcement
+### Presentation
 
-3. **AI orchestration**
-   - source router
-   - semantic cache
-   - retrieval
-   - optional reranking
-   - generation
-   - citation/provenance assembly
-   - refusal/grounding checks
+- React/TypeScript web client
+- document manager
+- chat
+- citation/source inspector
+- administrator source-policy settings
+- observability/benchmark views
 
-4. **Provider layer**
-   - document storage
-   - vector index
-   - embeddings
-   - model inference
-   - web search
-   - cache
-   - telemetry exporters
+Target deployment: S3 + CloudFront.
 
-5. **Infrastructure**
-   - local Docker services
-   - AWS resources
-   - Terraform
-   - CI/CD
+### Identity
 
-## Provider contracts
+Amazon Cognito provides authentication.
 
-The exact APIs will be designed during implementation, but the core should depend on abstractions conceptually similar to:
+Every request reaching private company knowledge must resolve a server-trusted user/workspace identity.
 
-```python
-DocumentStore
-VectorStore
-EmbeddingProvider
-GenerationProvider
-WebSearchProvider
-SemanticCache
-TelemetrySink
+### API/runtime
+
+Amazon API Gateway fronts AWS Lambda-based API/orchestration functions unless implementation measurements justify a different AWS runtime later.
+
+Responsibilities include:
+
+- authentication/authorization context
+- upload signing
+- workspace/source policy
+- query orchestration
+- semantic cache lookup/store
+- source routing
+- Bedrock invocation
+- citation assembly
+- telemetry
+
+### Document storage
+
+Private source documents live in Amazon S3.
+
+Clients upload directly to S3 with short-lived, scoped presigned requests. The API should not proxy hundreds of document bodies through Lambda.
+
+### Enterprise RAG
+
+Initial design:
+
+```text
+Amazon S3 documents
+        |
+        v
+Amazon Bedrock Knowledge Base
+        |
+        +-- parsing/chunking
+        +-- embeddings
+        |
+        v
+Amazon S3 Vectors
 ```
 
-A Local Mode implementation and an AWS Mode implementation should satisfy the same contracts.
+Bedrock Knowledge Bases is responsible for the managed RAG ingestion/retrieval path in the first implementation.
+
+S3 Vectors is the initial vector-store choice. If benchmarks show that throughput, filtering, hybrid-search, or latency requirements require another AWS vector backend, the change must be documented as an architecture decision.
+
+### Public web evidence
+
+Amazon Bedrock Web Search is the initial web-retrieval path.
+
+It may only be invoked when the administrator's source policy and the privacy/source router permit it.
+
+### Generation
+
+Amazon Bedrock is the supported foundation-model layer.
+
+Model IDs remain configuration, not hard-coded business logic.
+
+### Semantic cache
+
+Amazon ElastiCache for Valkey is the planned semantic cache.
+
+Cache correctness is more important than cache hit rate. Cache entries are scoped by security/relevance context such as:
+
+```text
+workspace_id
+corpus_version
+permission_scope
+source_policy
+model_id/config_version
+prompt_version
+cache_schema_version
+```
+
+### Observability
+
+Use OpenTelemetry instrumentation throughout the query path.
+
+AWS export targets include CloudWatch/X-Ray where appropriate.
+
+### Infrastructure
+
+Terraform owns supported AWS infrastructure.
+
+Manual console setup may be used for exploration during development, but the documented/reproducible product deployment must not depend on undocumented console clicks.
+
+---
 
 ## Query flow
 
 ```text
-1. User question
-2. Resolve workspace + permissions
-3. Apply administrator source policy
-4. Classify internal / web / mixed when Smart Routing is enabled
-5. Check semantic cache within the same workspace/corpus/permission scope
-6. Retrieve evidence from allowed sources
-7. Generate answer constrained by evidence
-8. Build normalized citations
-9. Run grounding/refusal checks
-10. Store safe cache entry when eligible
-11. Emit trace + metrics
-12. Return answer + citations + source-route metadata
+1. User submits question.
+2. API resolves authenticated user + workspace.
+3. Load administrator source policy.
+4. Run privacy/source routing before external web access.
+5. Create cache lookup context and query embedding.
+6. Check workspace/version/permission-safe semantic cache.
+7. If cache miss:
+      a. INTERNAL -> Bedrock Knowledge Base retrieval
+      b. WEB      -> Bedrock Web Search
+      c. MIXED    -> both
+8. Generate answer with Bedrock using allowed evidence.
+9. Normalize citations/provenance.
+10. Run grounding/refusal checks.
+11. Store cache entry only when eligible.
+12. Emit traces/metrics.
+13. Return answer + citations + route/cache metadata.
 ```
 
-## Ingestion flow
-
-### Local
+## Bulk upload and ingestion flow
 
 ```text
-filesystem scan
-  -> fingerprint file
-  -> skip unchanged
-  -> parse
-  -> chunk
-  -> embed
-  -> upsert vector index
-  -> update corpus version
+Browser
+  |
+  | request upload batch
+  v
+API/Lambda
+  |
+  | returns scoped presigned upload requests
+  v
+Browser ==========================> Amazon S3
+  |                                   |
+  | concurrent uploads                |
+  +-----------------------------------+
+                                      |
+                                batch completion
+                                      |
+                                      v
+                             ingestion orchestration
+                                      |
+                                      v
+                         Bedrock Knowledge Base sync
+                                      |
+                         parse / chunk / embed / index
+                                      |
+                                      v
+                                  S3 Vectors
 ```
 
-### AWS
+The implementation may use SQS/Lambda or another AWS-native orchestration mechanism where it improves reliability and batch-status handling.
+
+Do not start one expensive/duplicative ingestion workflow per file without measuring/justifying that design.
+
+## Document status model
+
+At minimum:
 
 ```text
-browser
-  -> presigned S3 uploads
-  -> ingestion event
-  -> queue
-  -> workers
-  -> parse/chunk/embed/index
-  -> status store
-  -> update corpus version
+UPLOADING
+UPLOADED
+QUEUED
+INDEXING
+INDEXED
+FAILED
+DELETING
+DELETED
 ```
 
-Ingestion must be asynchronous for large batches and expose per-document status.
+Batch status should derive from document statuses.
 
-## Source routing
+## Source policies
 
-Administrator policy is authoritative.
+Administrator policy is authoritative:
 
 ```text
 DOCUMENTS_ONLY
@@ -121,18 +195,16 @@ DOCUMENTS_AND_WEB
 WEB_ONLY
 ```
 
-For SMART:
+SMART routes:
 
-- internal/business-specific query -> internal retrieval only
-- general/public query -> web
-- comparative/mixed query -> internal + web
-- uncertain/private-looking query -> prefer internal path and avoid external leakage
+- company-specific/process-specific -> internal
+- general/current public knowledge -> web
+- comparative question -> mixed
+- uncertain/private-looking -> safest allowed route; do not leak text externally by default
 
-Routing should be testable independently from answer quality.
+## Citation/provenance model
 
-## Citation model
-
-Internal and web evidence are normalized to a common provenance model.
+Internal and web evidence normalize into a common model while preserving origin.
 
 Suggested fields:
 
@@ -141,61 +213,102 @@ source_type
 workspace_id
 source_id
 title
-uri_or_document_id
+document_id_or_url
 page
 section
 snippet
 retrieval_score
 retrieved_at
-content_hash
+content_hash_or_version
 ```
 
-## Semantic cache
-
-Cache lookup should use semantic similarity, but cache eligibility is stricter than "looks similar."
-
-A cache namespace must include:
+## Semantic cache flow
 
 ```text
-workspace_id
-corpus_version
-permission_scope
-source_policy
-model_version
-prompt/config_version
+question
+   |
+   v
+embedding
+   |
+   v
+Valkey similarity search
+   |
++--+-----------------------+
+|                          |
+HIT                        MISS
+|                          |
+validate context            v
+|                     source retrieval
+|                          |
+|                     Bedrock generation
+|                          |
+|                     citations/grounding
+|                          |
++-------------> response <-+
+                           |
+                      safe cache store
 ```
 
-Any corpus update changes the active corpus version so old cached answers cannot be served against new knowledge.
+Corpus/document changes must make entries from the previous corpus version ineligible even if their text similarity is high.
 
-## Observability
+## OpenTelemetry span model
 
-Instrument major spans:
+Target spans:
 
 ```text
 question.request
-auth
-source_router
+auth.resolve
+source_policy.load
+source_router.classify
+cache.embed
 cache.lookup
-embedding
 retrieval.internal
 retrieval.web
-rerank
 llm.generate
 citation.build
 grounding.check
 cache.store
 ```
 
-Capture metadata and timing by default. Do not capture full prompts, retrieved passages, or confidential documents unless an administrator explicitly enables a safe debugging mode.
+Useful attributes include model identifiers, route, cache result, token counts, retrieval counts/scores, durations, status codes, and opaque source IDs.
+
+Do not record private prompts or document text by default.
 
 ## Multi-tenancy
 
-Every document, vector, cache entry, query, trace correlation record, and citation must belong to a workspace.
+Workspace identity must be enforced in:
 
-Workspace identity is enforced at the storage/query layer, not only in UI filtering.
+- S3 key layout/access
+- knowledge-base metadata/filtering strategy
+- query authorization
+- cache namespace
+- citation access
+- conversation state
+- telemetry correlation
 
-## Future agent/action layer
+UI filtering alone is never a security boundary.
 
-OpsPilot may later support actions such as ticket lookup or escalation creation.
+## Cost-aware architecture
 
-Action tools are intentionally outside the initial MVP. Any mutating action must have authorization checks and, for sensitive actions, human confirmation.
+Optional higher-cost components should be feature-gated where feasible.
+
+Examples:
+
+- semantic cache
+- web search
+- detailed observability retention
+- higher-capacity cache configurations
+
+Terraform outputs/documentation must make teardown easy.
+
+## Future action/agent layer
+
+Only after the knowledge system is reliable:
+
+- read-only tool calls
+- ticket/customer lookup
+- proposed actions
+- human confirmation
+- authorized write actions
+
+Mutating actions must be independently authorized at execution time.

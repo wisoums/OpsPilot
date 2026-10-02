@@ -1,104 +1,167 @@
 # Security and Trust Model
 
-OpsPilot is intended for internal knowledge, so security is part of the product architecture rather than an optional hardening phase.
+OpsPilot is an AWS-native assistant for private enterprise knowledge. Security is therefore part of the architecture, not a later hardening exercise.
 
-## Principles
+## 1. Authenticated workspace identity
 
-### 1. Private routing before external access
+Amazon Cognito is the initial authentication layer.
 
-A question must be classified under the administrator's source policy before any external web search call is made.
+The backend must derive workspace/user identity from trusted authentication context. A client-supplied `workspace_id` is not sufficient authorization.
 
-Internal terminology should not be leaked to a public search provider merely to discover that the query is internal.
+## 2. Private routing before web access
 
-### 2. Evidence-backed generation
+Source policy and privacy routing occur before Amazon Bedrock Web Search is allowed to receive the query.
 
-When evidence is required, the model should answer from retrieved sources rather than unsupported model memory.
+Internal terminology should not be sent externally merely to determine that it was internal.
 
-If evidence is insufficient, the preferred behavior is an explicit refusal such as:
+For uncertain/private-looking prompts, prefer the safer route unless the administrator has explicitly chosen a policy that permits broader web use.
 
-> I could not find enough information in the configured sources to answer this question.
+## 3. Evidence-backed generation
 
-### 3. Workspace isolation
+In evidence-required modes, answers should be produced from allowed retrieved evidence.
 
-The following must always be workspace-scoped:
+If evidence is insufficient, the preferred behavior is explicit refusal/uncertainty rather than unsupported model-memory output.
 
-- documents
-- chunks/vectors
-- retrieval filters
-- cache entries
-- conversation state
-- citations
-- telemetry correlation metadata
+## 4. S3 isolation and upload safety
 
-Cross-workspace cache hits or retrieval results are security defects.
+Document uploads must use scoped, short-lived presigned requests.
 
-### 4. Permission-aware retrieval
+Controls should cover:
 
-If document-level permissions are introduced, the retrieval query and semantic cache scope must include the user's effective permission set.
+- workspace-specific object prefixes
+- allowed content types/extensions
+- maximum file size
+- upload expiration
+- server-side validation after upload
+- encryption
+- public-access blocking
 
-A cache hit is only safe when the current user is authorized to see the evidence that produced it.
+No private document bucket should be public.
 
-### 5. Safe telemetry
+## 5. Least-privilege IAM
 
-OpenTelemetry should capture:
-
-- span names
-- timing
-- cache hit/miss
-- model/provider identifiers
-- token counts
-- retrieval counts/scores
-- error codes
-- opaque document IDs
-
-It should not capture by default:
-
-- full private prompts
-- raw document text
-- credentials
-- access tokens
-- personal or confidential source content
-
-### 6. Least-privilege AWS access
-
-AWS components should have separate IAM roles where practical.
+Use separate/scoped roles where practical.
 
 Examples:
 
-- ingestion worker: read uploaded objects, write index/status
-- query API: invoke configured Bedrock model, query allowed index/cache
-- upload signer: create scoped presigned upload requests
-- observability exporter: write only required telemetry
+- upload signer: permission to sign/authorize only intended upload locations
+- ingestion orchestration: start/inspect allowed knowledge-base ingestion operations
+- query runtime: retrieve from the configured KB, invoke allowed Bedrock models/tools, use allowed cache
+- telemetry exporter: write only required logs/metrics/traces
 
-### 7. Cache safety
+Wildcard actions/resources require documented justification.
 
-Semantic cache entries must be invalidated or namespaced when:
+## 6. Workspace isolation
 
-- corpus changes
-- permissions change materially
-- source policy changes
-- model/prompt configuration changes
+These are always workspace-scoped:
 
-TTL may be used in addition to, not instead of, versioned cache identity.
+- S3 documents
+- retrieval metadata/filters
+- cache entries
+- conversation state
+- citations
+- evaluation fixtures when tenant-specific
+- telemetry correlation metadata
 
-### 8. Web citation integrity
+Cross-workspace retrieval/cache behavior is a security defect.
 
-Web-derived answers must store the source URL/title and retrieval timestamp.
+## 7. Permission-aware retrieval
 
-The generated answer should never present a web claim as company policy unless internal evidence supports that interpretation.
+If document-level permissions are introduced, effective permissions must participate in both retrieval authorization and cache eligibility.
+
+A cached response is not safe merely because the question is semantically similar.
+
+## 8. Semantic-cache safety
+
+A semantic cache entry must be ineligible when relevant context changes, including:
+
+- corpus version
+- permissions
+- workspace
+- source policy
+- model/prompt configuration
+- cache schema/eligibility rules
+
+TTL supplements versioned identity; it does not replace it.
+
+## 9. Safe observability
+
+OpenTelemetry/CloudWatch/X-Ray should capture by default:
+
+- trace/span IDs
+- operation names
+- duration
+- cache hit/miss
+- route
+- model identifier
+- token counts where available
+- retrieval counts/scores
+- opaque document IDs
+- error/status metadata
+
+Do not capture by default:
+
+- full private prompts
+- raw retrieved passages
+- uploaded document contents
+- credentials/tokens
+- presigned URLs
+- personal/confidential source content
+
+## 10. Web evidence integrity
+
+Web-derived claims must retain URL/title/retrieval timestamp/citation information.
+
+A web source must never be presented as internal company policy.
+
+Mixed answers should clearly distinguish company evidence from public evidence.
+
+## 11. Prompt-injection resistance
+
+Treat uploaded documents and web pages as **untrusted data**, not instructions.
+
+Evaluation must include content that attempts to:
+
+- override system/source policy
+- request secrets
+- alter routing
+- bypass authorization
+- suppress citations
+- trigger future tools/actions
+
+## 12. AWS audit and encryption
+
+Use CloudTrail/audit facilities where they materially improve traceability.
+
+Use service-managed or KMS encryption according to the data/resource threat model. The project should document why customer-managed KMS keys are used where enabled rather than adding them purely for complexity.
+
+## 13. Cost as a security/reliability concern
+
+Abuse can become spend.
+
+Controls should eventually include:
+
+- request/upload limits
+- Bedrock invocation limits where practical
+- AWS Budgets/alerts
+- bounded batch concurrency
+- queue/backpressure controls
+- cache size/TTL policy
 
 ## Threats to test
 
-- prompt injection embedded in uploaded documents
-- malicious instructions inside web content
-- cross-tenant retrieval
-- cross-tenant semantic cache hit
-- stale cache after policy/document update
-- citation pointing to a source not used
-- unsupported answer when retrieval is empty
-- private term sent to external search
+- cross-workspace S3 access
+- cross-workspace retrieval
+- cross-workspace semantic cache hit
+- stale cache after document update
+- unauthorized cached citation
+- private query sent to web search
+- prompt injection in internal documents
+- prompt injection in web content
+- unsupported answer on empty retrieval
 - oversized/malformed upload
-- path traversal in local ingestion
-- telemetry accidentally logging confidential content
+- presigned upload scope abuse
+- telemetry leaking confidential content
+- excessive/replayed requests causing unbounded spend
 
-These should eventually become automated tests where feasible.
+These should become automated regression tests where feasible.

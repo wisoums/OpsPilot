@@ -1,23 +1,26 @@
 # Contributing to OpsPilot
 
-OpsPilot is being built as a production-style AI system, so contributions should keep changes testable, reviewable, and observable.
+OpsPilot is an AWS-native production-style AI engineering project. Contributions should keep changes testable, reviewable, observable, secure, and cost-aware.
 
 ## Workflow
 
 1. Pick or create an issue.
 2. Create a focused branch.
 3. Keep the PR scoped to the issue.
-4. Add or update tests for behavior changes.
-5. Update documentation when architecture/configuration changes.
-6. Include benchmark evidence when changing performance-sensitive code.
+4. Add/update tests.
+5. Update documentation for architecture/configuration changes.
+6. Include benchmark evidence for performance/cost-sensitive changes.
+7. Do not silently change accepted AI regression baselines.
 
 ## Branch names
 
 Examples:
 
 ```text
-feature/local-ingestion
+feature/s3-bulk-upload
+feature/bedrock-kb
 feature/source-router
+feature/semantic-cache
 fix/cache-isolation
 docs/security-model
 ```
@@ -29,22 +32,36 @@ A PR should explain:
 - what changed
 - why
 - how it was tested
+- AWS resources/services affected
 - security/privacy implications
-- performance implications when relevant
-- screenshots/traces/benchmark output when useful
+- cost implications
+- performance implications
+- screenshots/traces/benchmark output where useful
 
 ## Engineering rules
 
-- Do not hard-code provider-specific behavior into core logic.
-- Do not log private document content by default.
-- Retrieval and caching must always be workspace-scoped.
-- New AI behavior should have an evaluation story, not only manual examples.
-- Keep local mode usable without AWS.
-- Keep AWS deployment reproducible through Infrastructure as Code.
+- OpsPilot's supported product path is AWS-native.
+- Localhost development is allowed; a parallel local AI product stack is not a requirement.
+- Infrastructure required by the supported deployment belongs in Terraform.
+- Do not log private document/prompt content by default.
+- Retrieval and caching must be workspace-scoped.
+- External web retrieval must respect source policy/privacy routing.
+- New AI behavior needs an evaluation story, not only manual examples.
+- Resume/README performance or cost claims must come from reproducible project benchmarks.
+- Avoid adding AWS services only to increase the service count; every service must have a justified responsibility.
+
+## AWS development safety
+
+- Use a dedicated dev environment/account where possible.
+- Never commit AWS credentials.
+- Prefer least-privilege roles.
+- Tag resources consistently.
+- Know which resources continue billing while idle.
+- Run teardown when an experiment no longer needs persistent resources.
 
 ## Development setup
 
-Concrete setup commands will be added as the first runnable scaffold lands.
+Concrete commands will land with the foundation/AWS-core issues.
 
 Until then, see:
 

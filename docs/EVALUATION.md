@@ -1,10 +1,10 @@
 # Evaluation and Benchmarking
 
-OpsPilot should be measured as an AI system, not judged only by whether a demo answer looks good.
+OpsPilot is evaluated as an AWS AI system, not by whether a few demo answers look convincing.
 
 ## Synthetic enterprise corpus
 
-The repository will include a generator for fictional company documents containing invented names, processes, codes, and policies that a pretrained model could not reliably know.
+The repository will generate fictional private business documents containing invented processes, names, codes, approval levels, and cross-document relationships that a pretrained model cannot be expected to know.
 
 Example:
 
@@ -13,71 +13,94 @@ The NOVA-7 procedure requires Level Amber approval before a Helios
 supplier can enter Stage Kappa.
 ```
 
-This creates a controlled benchmark for retrieval and grounding.
+Ground truth is emitted alongside the corpus.
 
 ## Query categories
 
-Evaluation workloads should contain:
-
-1. internal-only questions
-2. general/web-only questions
-3. mixed internal + external questions
-4. paraphrased repeated questions
-5. exact repeated questions
-6. uncommon long-tail questions
-7. deliberately unanswerable questions
+1. internal-only
+2. public/web-only
+3. mixed internal + web
+4. exact repeated
+5. paraphrased repeated
+6. uncommon/long-tail
+7. deliberately unanswerable
 8. conflicting/outdated document cases
+9. privacy-sensitive internal terminology
+10. adversarial prompt-injection cases
 
-## Metrics
+## Retrieval metrics
 
-### Retrieval
-
-- Recall@k where ground truth is available
-- MRR / rank of expected source
-- retrieval latency
+- Recall@k
+- expected-source rank / MRR
 - zero-result rate
-- source filtering correctness
+- source-filter correctness
+- retrieval latency
+- Bedrock Knowledge Base retrieval failures
 
-### Routing
+## Routing/privacy metrics
 
-- internal/web/mixed classification accuracy
-- private-query external leakage rate
+- INTERNAL/WEB/MIXED classification accuracy
 - unnecessary web-search rate
 - unnecessary internal-retrieval rate
+- private-query external leakage rate
+- uncertain-route behavior
 
-### Generation and grounding
+## Generation/grounding metrics
 
-- answer correctness on synthetic ground truth
-- citation coverage
-- citation correctness
+- factual correctness on synthetic ground truth
 - unsupported-claim rate
-- appropriate refusal rate
+- appropriate-refusal rate
+- contradiction with retrieved evidence
+- answer relevance where useful
 
-### Semantic cache
+## Citation metrics
+
+- citation presence
+- citation correctness
+- citation coverage
+- broken/inaccessible source references
+- company-vs-web source labeling correctness
+
+## Semantic-cache metrics
 
 - exact hit rate
 - semantic hit rate
 - false-hit rate
 - stale-hit rate (target: 0)
+- cross-workspace/permission unsafe hit rate (target: 0)
 - LLM calls avoided
-- latency reduction
-- estimated cost reduction
+- token reduction
+- estimated Bedrock-cost reduction
+- average/p95 latency reduction
 
-### Ingestion
+## Ingestion metrics
+
+Benchmark direct S3 upload separately from knowledge-base indexing.
+
+### Upload
+
+- files/second
+- MB/second
+- retry/failure rate
+- large-file multipart behavior
+
+### Ingestion/indexing
 
 - documents/minute
-- pages or chunks/minute
-- failure rate
-- incremental re-index efficiency
-- indexing completion latency
+- time from upload-complete to queryable
+- failed-document rate
+- batch completion time
+- incremental update behavior
 
-### Runtime
+## Runtime/cost metrics
 
-- end-to-end average latency
-- p50 / p95 / p99 latency
+- p50 / p95 / p99 end-to-end latency
+- Bedrock invocation latency
+- error rate
 - token usage
 - estimated cost/request
-- error rate
+- cost/1,000 queries
+- cache-enabled vs cache-disabled cost
 
 ## Benchmark scenarios
 
@@ -91,14 +114,66 @@ Evaluation workloads should contain:
 - 1,000 documents
 - 10,000 questions
 
-### Large/local stress
+### Stress
 
-Scale until the test machine becomes the bottleneck and report hardware.
+Increase corpus/query/batch size until an AWS service quota, configured capacity, latency target, or cost budget becomes the limiting factor.
+
+Report the exact AWS region, model IDs, Terraform configuration, cache configuration, and relevant quotas/capacity.
+
+## Semantic-cache experiment
+
+At minimum compare:
+
+```text
+A. cache disabled
+B. exact-match caching
+C. semantic caching
+```
+
+Across workload redundancy profiles such as:
+
+```text
+10%
+30%
+50%
+70%
+```
+
+Resume/README percentage claims must come from these reproducible OpsPilot results.
+
+## AI regression baselines
+
+Version:
+
+- prompts
+- model IDs
+- embedding model
+- retrieval top-k/thresholds
+- chunking configuration
+- routing configuration
+- cache similarity threshold
+- grounding/refusal rules
+- evaluation-dataset version
+
+CI compares relevant changes against an accepted machine-readable baseline.
+
+Examples of blocking regressions:
+
+- private-query leakage increases
+- stale cache hit occurs
+- cross-workspace cache/retrieval succeeds
+- unsupported-claim rate crosses threshold
+- retrieval quality drops beyond budget
+
+Performance/cost regressions may warn or fail according to explicit version-controlled budgets.
 
 ## Benchmark rules
 
-- Report hardware/environment.
+- Never copy vendor benchmark percentages into OpsPilot claims.
+- Record AWS region and service/model configuration.
 - Separate cold and warm runs.
-- Separate cache-disabled and cache-enabled results.
-- Do not reuse AWS marketing benchmark numbers as OpsPilot results.
-- Preserve benchmark configuration in version control.
+- Separate cache-disabled and cache-enabled runs.
+- Record dataset/workload seed/version.
+- Keep raw machine-readable results as artifacts.
+- Make baseline updates explicit and reviewed.
+- Do not print private production data into public CI logs.

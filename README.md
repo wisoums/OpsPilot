@@ -6,11 +6,54 @@ OpsPilot is a publicly developed AI engineering project built around one questio
 
 > What does it take to make an enterprise AI assistant **useful, trustworthy, measurable, and cost-aware in production on AWS**?
 
-The target product lets a team deploy OpsPilot into its own AWS account, upload hundreds or thousands of internal documents, ask natural-language questions, and receive answers grounded in either private company knowledge, the live web, or both — always with provenance.
+The target product lets a team deploy OpsPilot into its own AWS account, upload a private document collection, ask natural-language questions, and receive answers grounded in either private company knowledge, the live web, or both — always with provenance.
 
 OpsPilot is intentionally **AWS-native**. It is not maintaining a second local AI stack. Development can happen from a laptop, but the document storage, RAG, model inference, cache, identity, observability, and deployed runtime are AWS-backed.
 
 > 🚧 **Status:** architecture and backlog are defined; implementation is beginning now. The README distinguishes planned behavior from completed behavior.
+
+---
+
+## Flagship scope
+
+OpsPilot is intentionally scoped as a **production-grade, measurable RAG/LLMOps project**. The flagship release does exactly these things:
+
+- AWS-native serverless RAG over private documents + live web evidence.
+- Semantic caching with Amazon ElastiCache for Valkey and reproducible before/after measurements.
+- A fixed evaluation harness for retrieval quality, faithfulness, answer correctness/relevancy, routing, and cache correctness.
+- A CI regression gate that fails when quality, latency, privacy, or cost crosses version-controlled thresholds.
+- OpenTelemetry traces for routing, retrieval, generation, and cache behavior.
+- Terraform deployment into the user's AWS account.
+- A public benchmark summary with quality, p95 latency, and cost per 1,000 queries.
+- A concise technical write-up or short demo showing the system and measured results.
+
+### Flagship success criteria
+
+The project is not considered complete until the repository contains reproducible evidence for all of the following:
+
+| Area | Required evidence |
+|---|---|
+| Quality | Fixed evaluation set with faithfulness >= 0.85 and answer relevancy >= 0.80 |
+| Retrieval | Recall@k / source-rank metrics reported on the fixed test set |
+| Cache | Cache-disabled vs semantic-cache benchmark with hit rate, false-hit rate, LLM calls avoided, p95 latency, and cost |
+| Cost | Estimated AWS/Bedrock cost per 1,000 queries with and without semantic cache |
+| Privacy | Private-query external leakage = 0 on the regression suite |
+| CI | A deliberately bad model/prompt/retrieval configuration demonstrably fails the regression gate |
+| Observability | OpenTelemetry traces expose routing, cache, retrieval, and generation spans |
+| Deployment | Terraform deploy/use/destroy path is documented and reproducible |
+| Communication | README benchmark table plus one-page technical write-up or short demo |
+
+Thresholds are release targets, not claims. Published numbers must come from recorded OpsPilot benchmark artifacts.
+
+### Out of scope for the flagship release
+
+The following are deliberately deferred so the project stays focused:
+
+- autonomous or mutating agent actions
+- LangGraph integration
+- polished enterprise admin/product-management surfaces
+- large-scale ingestion stress testing
+- release packaging beyond what is needed to deploy and reproduce the benchmark
 
 ---
 
@@ -99,9 +142,9 @@ The vector backend remains an architecture decision we can benchmark later; if t
 
 ---
 
-## Bulk document ingestion
+## Document ingestion
 
-OpsPilot is meant to be tested with more than five demo PDFs.
+OpsPilot needs a real private-document ingestion path so the RAG system can be evaluated on a fixed enterprise-style corpus.
 
 For AWS deployments, file bytes should go **directly from the browser to Amazon S3** using scoped presigned uploads rather than flowing through the API Lambda.
 
@@ -124,15 +167,14 @@ Browser
  parse -> chunk -> embed -> S3 Vectors
 ```
 
-Planned behavior:
+Flagship behavior:
 
-- bounded parallel uploads
-- multipart upload for large files
-- per-document/batch status
-- asynchronous ingestion
+- direct-to-S3 upload
+- indexing/sync status sufficient for the evaluation corpus
 - retry/failure reporting
-- incremental sync behavior
-- benchmarks at 100, 1,000, and stress-scale documents
+- incremental corpus-version tracking for cache safety
+
+High-scale ingestion benchmarking and product-grade upload management are intentionally outside the flagship scope.
 
 ---
 
@@ -356,8 +398,7 @@ This gives us controlled ground truth for:
 4. **Least-privilege IAM** — each runtime component gets only required AWS actions/resources.
 5. **Safe caching** — corpus/policy/permission/config changes make unsafe old entries ineligible.
 6. **No sensitive telemetry by default** — metadata and timings, not confidential content.
-7. **Human control for future actions** — mutating agent tools require explicit authorization/approval.
-8. **Reproducible infrastructure** — supported AWS resources are created through Terraform.
+7. **Reproducible infrastructure** — supported AWS resources are created through Terraform.
 
 See [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -392,15 +433,14 @@ Not every optional service will be enabled in the cheapest deployment profile.
 
 ## Roadmap
 
-1. **Foundation**
-2. **AWS Core**
-3. **AWS RAG & Bulk Ingestion**
-4. **Smart Routing + Bedrock Web Search**
-5. **Semantic Cache**
-6. **OpenTelemetry + AWS Observability**
-7. **Evaluation + AI Regression CI**
-8. **Productization**
-9. **Future agent actions**
+1. **Foundation + Terraform**
+2. **AWS RAG over private documents**
+3. **Private + web source routing**
+4. **Semantic cache**
+5. **OpenTelemetry observability**
+6. **Evaluation harness**
+7. **AI regression gate in CI**
+8. **Benchmark + technical write-up/demo**
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) and [the master roadmap issue](https://github.com/wisoums/OpsPilot/issues/1).
 

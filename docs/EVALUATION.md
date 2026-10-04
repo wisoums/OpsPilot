@@ -2,9 +2,28 @@
 
 OpsPilot is evaluated as an AWS AI system, not by whether a few demo answers look convincing.
 
-## Synthetic enterprise corpus
+The flagship release uses a **fixed, versioned evaluation set** and treats quality, latency, privacy, and cost as regression-tested software properties.
 
-The repository will generate fictional private business documents containing invented processes, names, codes, approval levels, and cross-document relationships that a pretrained model cannot be expected to know.
+## Release acceptance targets
+
+These are project targets, not published claims. Final README/resume numbers must come from reproducible benchmark artifacts.
+
+| Dimension | Release target |
+|---|---:|
+| Faithfulness | >= 0.85 |
+| Answer relevancy | >= 0.80 |
+| Private-query external leakage | 0 |
+| Stale semantic-cache unsafe hits | 0 |
+| Cross-context unsafe cache hits | 0 |
+| CI regression gate | Proven to fail on an intentionally bad change |
+| p95 latency | Measured and versioned against baseline |
+| Cost / 1,000 queries | Measured with cache OFF vs ON |
+
+Retrieval Recall@k/MRR targets are established from the initial baseline and then version-controlled rather than invented in advance.
+
+## Fixed synthetic enterprise corpus
+
+The repository generates fictional private business documents containing invented processes, names, codes, approval levels, and cross-document relationships that a pretrained model cannot be expected to know.
 
 Example:
 
@@ -13,133 +32,114 @@ The NOVA-7 procedure requires Level Amber approval before a Helios
 supplier can enter Stage Kappa.
 ```
 
-Ground truth is emitted alongside the corpus.
+Ground truth is emitted alongside the corpus so retrieval and answer correctness can be scored reproducibly.
 
-## Query categories
+## Evaluation set
 
-1. internal-only
-2. public/web-only
-3. mixed internal + web
-4. exact repeated
-5. paraphrased repeated
-6. uncommon/long-tail
-7. deliberately unanswerable
-8. conflicting/outdated document cases
-9. privacy-sensitive internal terminology
-10. adversarial prompt-injection cases
+The fixed set should cover:
+
+1. internal-only questions
+2. public/web-only questions
+3. mixed internal + web questions
+4. exact repeated questions
+5. paraphrased repeated questions
+6. deliberately unanswerable questions
+7. privacy-sensitive internal terminology
+8. conflicting/outdated evidence where useful for grounding tests
+
+The dataset version/seed must be recorded with each accepted baseline.
 
 ## Retrieval metrics
+
+Use deterministic retrieval metrics wherever possible:
 
 - Recall@k
 - expected-source rank / MRR
 - zero-result rate
 - source-filter correctness
 - retrieval latency
-- Bedrock Knowledge Base retrieval failures
 
-## Routing/privacy metrics
+## Generation and grounding metrics
 
-- INTERNAL/WEB/MIXED classification accuracy
+Use **Ragas or an equivalent LLM-as-judge only where semantic grading is required**, combined with deterministic checks for synthetic facts.
+
+Report:
+
+- faithfulness
+- answer relevancy
+- factual correctness against synthetic ground truth
+- unsupported-claim rate
+- appropriate-refusal rate
+
+## Routing and privacy metrics
+
+Report:
+
+- INTERNAL / WEB / MIXED routing accuracy
 - unnecessary web-search rate
 - unnecessary internal-retrieval rate
 - private-query external leakage rate
-- uncertain-route behavior
 
-## Generation/grounding metrics
-
-- factual correctness on synthetic ground truth
-- unsupported-claim rate
-- appropriate-refusal rate
-- contradiction with retrieved evidence
-- answer relevance where useful
+Privacy leakage above zero is a blocking regression.
 
 ## Citation metrics
+
+Report:
 
 - citation presence
 - citation correctness
 - citation coverage
-- broken/inaccessible source references
 - company-vs-web source labeling correctness
 
-## Semantic-cache metrics
-
-- exact hit rate
-- semantic hit rate
-- false-hit rate
-- stale-hit rate (target: 0)
-- cross-workspace/permission unsafe hit rate (target: 0)
-- LLM calls avoided
-- token reduction
-- estimated Bedrock-cost reduction
-- average/p95 latency reduction
-
-## Ingestion metrics
-
-Benchmark direct S3 upload separately from knowledge-base indexing.
-
-### Upload
-
-- files/second
-- MB/second
-- retry/failure rate
-- large-file multipart behavior
-
-### Ingestion/indexing
-
-- documents/minute
-- time from upload-complete to queryable
-- failed-document rate
-- batch completion time
-- incremental update behavior
-
-## Runtime/cost metrics
-
-- p50 / p95 / p99 end-to-end latency
-- Bedrock invocation latency
-- error rate
-- token usage
-- estimated cost/request
-- cost/1,000 queries
-- cache-enabled vs cache-disabled cost
-
-## Benchmark scenarios
-
-### Small
-
-- 100 documents
-- 1,000 questions
-
-### Medium
-
-- 1,000 documents
-- 10,000 questions
-
-### Stress
-
-Increase corpus/query/batch size until an AWS service quota, configured capacity, latency target, or cost budget becomes the limiting factor.
-
-Report the exact AWS region, model IDs, Terraform configuration, cache configuration, and relevant quotas/capacity.
-
-## Semantic-cache experiment
+## Semantic-cache benchmark
 
 At minimum compare:
 
 ```text
 A. cache disabled
-B. exact-match caching
-C. semantic caching
+B. semantic cache enabled
 ```
 
-Across workload redundancy profiles such as:
+Use a reproducible workload containing repeated and paraphrased queries.
+
+Report:
+
+- semantic cache hit rate
+- false-hit rate
+- stale/unsafe hit rate
+- LLM calls avoided
+- token reduction
+- average latency
+- p95 latency
+- estimated Bedrock cost per request
+- estimated Bedrock cost per 1,000 queries
+
+The README must include the final before/after table:
+
+| Metric | Cache OFF | Semantic Cache ON | Change |
+|---|---:|---:|---:|
+| p95 latency | TBD | TBD | TBD |
+| Bedrock calls / 1k queries | TBD | TBD | TBD |
+| Cost / 1k queries | TBD | TBD | TBD |
+| Faithfulness | TBD | TBD | TBD |
+| Answer relevancy | TBD | TBD | TBD |
+| Semantic cache hit rate | — | TBD | — |
+
+## OpenTelemetry evidence
+
+For benchmark runs, capture traces/spans for:
 
 ```text
-10%
-30%
-50%
-70%
+question.request
++-- source_router
++-- semantic_cache.lookup
++-- retrieval.internal / retrieval.web
++-- llm.generate
++-- citation.build
++-- grounding.check
 ```
 
-Resume/README percentage claims must come from these reproducible OpsPilot results.
+At minimum the benchmark artifact should make it possible to explain where latency and model cost came from.
 
 ## AI regression baselines
 
@@ -148,32 +148,38 @@ Version:
 - prompts
 - model IDs
 - embedding model
-- retrieval top-k/thresholds
+- retrieval top-k / thresholds
 - chunking configuration
 - routing configuration
 - cache similarity threshold
 - grounding/refusal rules
 - evaluation-dataset version
+- accepted latency and cost budgets
 
 CI compares relevant changes against an accepted machine-readable baseline.
 
-Examples of blocking regressions:
+### Blocking regressions
 
-- private-query leakage increases
-- stale cache hit occurs
-- cross-workspace cache/retrieval succeeds
-- unsupported-claim rate crosses threshold
-- retrieval quality drops beyond budget
+CI must fail when any of the following occurs:
 
-Performance/cost regressions may warn or fail according to explicit version-controlled budgets.
+- faithfulness < 0.85
+- answer relevancy < 0.80
+- private-query leakage > 0
+- stale/unsafe cache hit occurs
+- retrieval quality drops beyond its accepted budget
+- p95 latency regresses beyond the configured budget
+- cost/query regresses beyond the configured budget
 
-## Benchmark rules
+Baseline updates must be explicit and reviewed; a failing run cannot silently rewrite the baseline.
 
-- Never copy vendor benchmark percentages into OpsPilot claims.
-- Record AWS region and service/model configuration.
-- Separate cold and warm runs.
+## Benchmark artifact rules
+
+- Record AWS region and exact model IDs.
+- Record Terraform and cache configuration relevant to the run.
+- Separate cold and warm measurements where meaningful.
 - Separate cache-disabled and cache-enabled runs.
-- Record dataset/workload seed/version.
-- Keep raw machine-readable results as artifacts.
-- Make baseline updates explicit and reviewed.
+- Record dataset/workload seed and version.
+- Keep raw machine-readable results as CI/build artifacts.
+- Never copy vendor benchmark percentages into OpsPilot claims.
 - Do not print private production data into public CI logs.
+- Resume/README percentage claims must come from these reproducible OpsPilot results.
